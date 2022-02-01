@@ -127,36 +127,37 @@ def build_tf_matrix_vec(ra, dec, z, com_dists, mass, vlos, close_pairs=4):
     ind = np.where(vlos < 0)
     sign = np.zeros(n_clusts)
     sign[ind] = 1
-    vlos[ind] = abs(vlos[ind])
-    ind = np.where(vlos < 1e5)
+    #vlos[ind] = abs(vlos[ind])
+    ind = np.where(abs(vlos) < 1e5)
     vlos[ind] = 0
     return tf_mat, vlos/1e6, sign
 
-def tf_regression(mat, output_shape = 1, opt='adam', loss_func='mean_absolute_percentage_error'):
+def tf_regression(mat, output_shape = 1, rate=1e-5, loss_func='mse', metric='mean_absolute_percentage_error'):
     model = keras.Sequential([
-        keras.layers.ZeroPadding1D(padding=2, input_shape=mat[0].shape),
-        keras.layers.LocallyConnected1D(256, 3),
-        keras.layers.LocallyConnected1D(128, 5),
+        keras.layers.ZeroPadding1D(2, input_shape=mat[0].shape),
+        keras.layers.LocallyConnected1D(128, 4),
         keras.layers.GlobalMaxPool1D(),
-        keras.layers.Dense(1024, activation='relu'),
-        keras.layers.Dense(512, activation='relu'),
-        keras.layers.Dense(256, activation='relu'),
-        keras.layers.Dense(output_shape, activation='relu')
+        keras.layers.Dense(1024, activation='elu'),
+        keras.layers.Dense(512, activation='elu'),
+        keras.layers.Dense(256, activation='elu'),
+        keras.layers.Dense(output_shape, activation='linear')
         ])
-    model.compile(optimizer=opt, loss=loss_func)
+    opt = tf.keras.optimizers.Adam(learning_rate=rate)
+    model.compile(optimizer=opt, loss=loss_func, metrics=[metric])
     return model
 
-def tf_classification(mat, output_shape = 1, opt='adam', loss_func='binary_crossentropy', metric='accuracy'):
+def tf_classification(mat, output_shape = 1, rate=1e-5, loss_func='binary_crossentropy', metric='accuracy'):
     model = keras.Sequential([
-        keras.layers.ZeroPadding1D(padding=2, input_shape=mat[0].shape),
-        keras.layers.LocallyConnected1D(256, 3),
-        keras.layers.LocallyConnected1D(128, 5),
+        keras.layers.ZeroPadding1D(2, input_shape=mat[0].shape),
+        keras.layers.LocallyConnected1D(128, 4),
+        keras.layers.LocallyConnected1D(64, 3),
         keras.layers.GlobalMaxPool1D(),
-        keras.layers.Dense(512, activation='relu'),
-        keras.layers.Dense(256, activation='relu'),
-        keras.layers.Dense(128, activation='relu'),
+        keras.layers.Dense(256, activation='elu'),
+        keras.layers.Dense(256, activation='elu'),
+        keras.layers.Dense(256, activation='elu'),
         keras.layers.Dense(output_shape, activation='sigmoid')
         ])
+    opt = tf.keras.optimizers.Adam(learning_rate=rate)
     model.compile(optimizer=opt, loss=loss_func, metrics=[metric])
     return model
 
@@ -166,3 +167,11 @@ def plot_metric(history, metric='loss'):
     plt.ylabel('Change of '+metric)
     plt.legend()
     plt.show()
+
+def recompile(loc, rate=1e-5, loss_func='mse', metric='mean_absolute_percentage_error'):
+    model = tf.keras.models.load_model(loc, compile=False)
+    opt = tf.keras.optimizers.Adam(learning_rate=rate)
+    model.compile(optimizer=opt, loss=loss_func, metrics=[metric])
+    return model
+
+
