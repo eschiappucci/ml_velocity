@@ -7,12 +7,41 @@ import tensorflow as tf
 from tensorflow import keras
 from scipy.spatial import cKDTree
 from sklearn.model_selection import train_test_split as array_split
+from astropy.io import fits
 
 params = {'flat': True, 'H0': 67.66, 'Om0': (0.11933+0.02242)/(0.6766**2), 'Ob0': 0.02242/(0.6766**2), 'sigma8': 0.8102, 'ns': 0.9665}
 cosmo = cosmology.setCosmology('FullPlanck18', params)
 
 h = cosmo.Hz(0)/100
 print(cosmo.name)
+
+RA_SPTSZ_min = -50
+RA_SPTSZ_max = 50
+DEC_SPTSZ_min = -70
+DEC_SPTSZ_max = -40
+
+def fn_load_halo(fname, Mmin=1e14, Mmax=1e16, zmin=0.1 , zmax=1., nobj=None, like_SPTSZ=False):
+    """
+    Returns a RA, DEC, Z with redmapper catalog info.
+    """
+    cat = fits.open(fname)[1].data
+    cat = cat[(cat.REDSHIFT >= zmin) & (cat.REDSHIFT <= zmax)]
+    cat = cat[(cat.M500 >= Mmin) & (cat.M500 <= Mmax)]
+    if like_SPTSZ:
+        cat = cat[(cat.RA >= RA_SPTSZ_min) & (cat.RA <= RA_SPTSZ_max)]
+        cat = cat[(cat.DEC >= DEC_SPTSZ_min) & (cat.DEC <= DEC_SPTSZ_max)]
+
+    if nobj is not None:
+        cat = cat[np.random.randint(0,len(cat),size=nobj)]
+
+    cat.RA[np.where(cat.RA > 180)] = cat.RA[np.where(cat.RA > 180)] - 360
+    ra    = cat.RA
+    dec   = cat.DEC
+    zs    = cat.REDSHIFT
+    v_los = cat.VLOS
+    M200  = cat.M200
+
+    return ra, dec, zs, v_los, M200
 
 def readdata(filename, DECmin=None, DECmax=None, Zmin=None, Zmax=None, richmin=None, richmax=None, photoz=None, sigmaM=None, nobj=None, seed=None):
     clustinfo = ascii.read(filename)
@@ -96,7 +125,7 @@ def RaDec2XYZ(ra,dec):
 
     return np.array([x,y,z]).T
 
-def build_tf_matrix(ra, dec, z, com_dists, mass, vlos, close_pairs=4):
+def build_tf_matrix(ra, dec, z, mass, vlos, close_pairs=4):
     vec_unit = RaDec2XYZ(ra,dec) # Get unit vectors pointing to the cluster
     n_clusts = len(ra)
     vec_dist = (vec_unit.T * z).T # Mpc
@@ -110,11 +139,11 @@ def build_tf_matrix(ra, dec, z, com_dists, mass, vlos, close_pairs=4):
     sign = np.zeros(n_clusts)
     sign[ind] = 1
     vlos[ind] = abs(vlos[ind])
-    ind = np.where(vlos < 1e5)
+    ind = np.where(vlos < 1e2)
     vlos[ind] = 0
-    return tf_mat, vlos/1e6, sign
+    return tf_mat, vlos/1e3, sign
 
-def build_tf_matrix_vec(ra, dec, z, com_dists, mass, vlos, close_pairs=4):
+def build_tf_matrix_vec(ra, dec, z, mass, vlos, close_pairs=4):
     vec_unit = RaDec2XYZ(ra,dec) # Get unit vectors pointing to the cluster
     n_clusts = len(ra)
     vec_dist = (vec_unit.T * z).T # Mpc
@@ -128,19 +157,20 @@ def build_tf_matrix_vec(ra, dec, z, com_dists, mass, vlos, close_pairs=4):
     sign = np.zeros(n_clusts)
     sign[ind] = 1
     #vlos[ind] = abs(vlos[ind])
-    ind = np.where(abs(vlos) < 1e5)
-    vlos[ind] = 0
-    return tf_mat, vlos/1e6, sign
+    #ind = np.where(abs(vlos) < 1e2)
+    #vlos[ind] = 0
+    return tf_mat, np.exp(vlos/1e3), sign
 
 def tf_regression(mat, output_shape = 1, rate=1e-5, loss_func='mse', metric='mean_absolute_percentage_error'):
     model = keras.Sequential([
         keras.layers.ZeroPadding1D(2, input_shape=mat[0].shape),
         keras.layers.LocallyConnected1D(128, 4),
-        keras.layers.GlobalMaxPool1D(),
-        keras.layers.Dense(1024, activation='elu'),
+        keras.layers.LocallyConnected1D(64, 3),
+        keras.layers.LSTM(512),
+        #keras.layers.GlobalMaxPool1D(),
         keras.layers.Dense(512, activation='elu'),
         keras.layers.Dense(256, activation='elu'),
-        keras.layers.Dense(output_shape, activation='linear')
+        keras.layers.Dense(output_shape, activation='exponential')
         ])
     opt = tf.keras.optimizers.Adam(learning_rate=rate)
     model.compile(optimizer=opt, loss=loss_func, metrics=[metric])

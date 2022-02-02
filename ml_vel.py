@@ -3,10 +3,12 @@ from utils import *
 
 if __name__ == '__main__':
     #Reading the catalogue
-    filename = 'spt3g_yuuki_150GHz_m500c_0.6-5e14_MF_beta1_thetac05_noise5.dat'
-
+    #filename = 'spt3g_yuuki_150GHz_m500c_0.6-5e14_MF_beta1_thetac05_noise5.dat'
+    filename = 'catalog_fullsky_zsm1.fits.gz'
     decmin = -65
     decmax = -40
+    Mmin=1e14
+    Mmax=1e30
     zmin = 0.1
     zmax = 0.8
     richmin= 0.6e14*h
@@ -16,11 +18,12 @@ if __name__ == '__main__':
     seed = None #100
     sigmaM = None #0.3
 
-    RA, DEC, com_dists, mass, TSZ, Z, vlos = readdata(filename, DECmin=decmin, DECmax=decmax, Zmin=zmin, Zmax=zmax, richmin=richmin, richmax=richmax, photoz=photoz, sigmaM=sigmaM, nobj=nobj, seed=seed)
+    #RA, DEC, com_dists, mass, TSZ, Z, vlos = readdata(filename, DECmin=decmin, DECmax=decmax, Zmin=zmin, Zmax=zmax, richmin=richmin, richmax=richmax, photoz=photoz, sigmaM=sigmaM, nobj=nobj, seed=seed)
+    RA, DEC, Z, vlos, mass = fn_load_halo(filename, Mmin=Mmin, Mmax=Mmax, zmin=zmin, zmax=zmax)
 
     n_neighbours = 5
-    class_mat, reg_vec, class_vec = build_tf_matrix_vec(RA, DEC, Z, com_dists, mass, vlos, close_pairs = n_neighbours)
-    reg_mat, _, _ = build_tf_matrix(RA, DEC, Z, com_dists, mass, vlos, close_pairs = n_neighbours)
+    class_mat, reg_vec, class_vec = build_tf_matrix_vec(RA, DEC, Z, mass, vlos, close_pairs = n_neighbours)
+    reg_mat, _, _ = build_tf_matrix(RA, DEC, Z, mass, vlos, close_pairs = n_neighbours)
 
     """
     plt.figure()
@@ -47,42 +50,43 @@ if __name__ == '__main__':
     plt.hist(reg_vec, bins=50)
     plt.title('v_los')
     plt.show()
-
-
     """
-    new_models = False
+    print(class_mat.shape)
+    new_models = True
 
     class_loc = 'Models/vl_class.f5'
     reg_loc = 'Models/vl_reg.f5'
-    class_mat_train, class_mat_test, reg_mat_train, reg_mat_test, reg_vec_train, reg_vec_test, class_vec_train, class_vec_test = array_split(class_mat, reg_mat, reg_vec, class_vec, test_size=0.25)
+    class_mat_train, class_mat_test, reg_mat_train, reg_mat_test, reg_vec_train, reg_vec_test, class_vec_train, class_vec_test = array_split(class_mat, reg_mat, reg_vec, class_vec, test_size=0.3, random_state=986178946)
 
     if new_models:
+        """
         model_class = tf_classification(class_mat_train, rate=1e-3)
-        history = model_class.fit(class_mat_train, class_vec_train, epochs=200, verbose=0, shuffle=True)
+        history = model_class.fit(class_mat_train, class_vec_train, epochs=50, verbose=0, shuffle=True)
         model_class.evaluate(class_mat_test, class_vec_test, verbose=1)
         model_class.save(class_loc)
         plot_metric(history, metric='accuracy')
+        """
+
         model_reg = tf_regression(class_mat_train, rate=1e-3)
-        history = model_reg.fit(class_mat_train, reg_vec_train, epochs=200, verbose=0, shuffle=True)
+        history = model_reg.fit(class_mat_train, reg_vec_train, epochs=100, verbose=0, shuffle=True)
         model_reg.evaluate(class_mat_test, reg_vec_test, verbose=1)
-        model_class.save(reg_loc)
+        model_reg.save(reg_loc)
         plot_metric(history, metric='loss')
     else:
+        """
         model_class = recompile(class_loc, rate=1e-7, loss_func='binary_crossentropy', metric='accuracy')
-        model_reg = recompile(reg_loc, rate=1e-7)
-
         history = model_class.fit(class_mat_train, class_vec_train, epochs=100, verbose=0, shuffle=True)
         model_class.evaluate(class_mat_test, class_vec_test, verbose=1)
         model_class.save(class_loc)
         plot_metric(history, metric='accuracy')
-        model_class.save(class_loc)
+        """
+
+        model_reg = recompile(reg_loc, rate=1e-7)
         history = model_reg.fit(class_mat_train, reg_vec_train, epochs=100, verbose=0, shuffle=True)
         model_reg.evaluate(class_mat_test, reg_vec_test, verbose=1)
-        model_class.save(reg_loc)
+        model_reg.save(reg_loc)
         plot_metric(history, metric='mean_absolute_percentage_error')
-        model_class.save(reg_loc)
 
     print(np.mean(reg_vec), max(reg_vec), min(reg_vec), len(np.where(reg_vec==0)[0]))
     print(np.mean(class_vec), len(class_vec))
-
 
