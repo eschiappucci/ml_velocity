@@ -1,4 +1,5 @@
 #Imports
+from time import time
 from utils import *
 
 if __name__ == '__main__':
@@ -19,30 +20,31 @@ if __name__ == '__main__':
     sigmaM = None #0.3
 
     #RA, DEC, com_dists, mass, TSZ, Z, vlos = readdata(filename, DECmin=decmin, DECmax=decmax, Zmin=zmin, Zmax=zmax, richmin=richmin, richmax=richmax, photoz=photoz, sigmaM=sigmaM, nobj=nobj, seed=seed)
+    start = time()
     RA, DEC, Z, vlos, mass = fn_load_halo(filename, Mmin=Mmin, Mmax=Mmax, zmin=zmin, zmax=zmax)
 
-    n_neighbours = 5
-    class_mat, reg_vec, class_vec = build_tf_matrix_vec(RA, DEC, Z, mass, vlos, close_pairs = n_neighbours)
-    reg_mat, _, _ = build_tf_matrix(RA, DEC, Z, mass, vlos, close_pairs = n_neighbours)
+    n_neighbours = 6
+    reg_mat, reg_vec = build_tf_matrix_vec(RA, DEC, Z, mass, vlos, close_pairs = n_neighbours)
 
+    print(time() - start)
     """
     plt.figure()
-    plt.hist(class_mat[:,0,0], bins=50)
+    plt.hist(reg_mat[:,0,0], bins=50)
     plt.title('RA')
     plt.show()
 
     plt.figure()
-    plt.hist(class_mat[:,0,1], bins=50)
+    plt.hist(reg_mat[:,0,1], bins=50)
     plt.title('DEC')
     plt.show()
 
     plt.figure()
-    plt.hist(class_mat[:,0,2], bins=50)
+    plt.hist(reg_mat[:,0,2], bins=50)
     plt.title('z')
     plt.show()
 
     plt.figure()
-    plt.hist(class_mat[:,0,3], bins=50)
+    plt.hist(reg_mat[:,0,3], bins=50)
     plt.title('mass')
     plt.show()
 
@@ -51,42 +53,38 @@ if __name__ == '__main__':
     plt.title('v_los')
     plt.show()
     """
-    print(class_mat.shape)
+    print(reg_mat.shape)
     new_models = True
-
-    class_loc = 'Models/vl_class.f5'
+    retrain_num = 2
     reg_loc = 'Models/vl_reg.f5'
-    class_mat_train, class_mat_test, reg_mat_train, reg_mat_test, reg_vec_train, reg_vec_test, class_vec_train, class_vec_test = array_split(class_mat, reg_mat, reg_vec, class_vec, test_size=0.3, random_state=986178946)
+    reg_mat_train, reg_mat_test, reg_vec_train, reg_vec_test = array_split(reg_mat, reg_vec, test_size=0.3, random_state=986178946)
 
     if new_models:
-        """
-        model_class = tf_classification(class_mat_train, rate=1e-3)
-        history = model_class.fit(class_mat_train, class_vec_train, epochs=50, verbose=0, shuffle=True)
-        model_class.evaluate(class_mat_test, class_vec_test, verbose=1)
-        model_class.save(class_loc)
-        plot_metric(history, metric='accuracy')
-        """
+       start = time()
+       for i in range(retrain_num):
+            rate = 1e-3
+            if i == 0:
+                model_reg = tf_regression(reg_mat_train, rate=rate)
+                history = model_reg.fit(reg_mat_train, reg_vec_train, epochs=100, verbose=0, shuffle=True)
+                model_reg.evaluate(reg_mat_test, reg_vec_test, verbose=1)
+                model_reg.save(reg_loc)
+            else:
+                rate /= 10
+                model_reg = recompile(reg_loc, rate=rate)
+                history = model_reg.fit(reg_mat_train, reg_vec_train, epochs=100, verbose=0, shuffle=True)
+                model_reg.evaluate(reg_mat_test, reg_vec_test, verbose=1)
+                model_reg.save(reg_loc)
 
-        model_reg = tf_regression(class_mat_train, rate=1e-3)
-        history = model_reg.fit(class_mat_train, reg_vec_train, epochs=100, verbose=0, shuffle=True)
-        model_reg.evaluate(class_mat_test, reg_vec_test, verbose=1)
-        model_reg.save(reg_loc)
-        plot_metric(history, metric='loss')
+            period = time() - start
+            print(f'It took {period/60} minutes.')
+       plot_metric(history, metric='mean_absolute_percentage_error')
+
     else:
-        """
-        model_class = recompile(class_loc, rate=1e-7, loss_func='binary_crossentropy', metric='accuracy')
-        history = model_class.fit(class_mat_train, class_vec_train, epochs=100, verbose=0, shuffle=True)
-        model_class.evaluate(class_mat_test, class_vec_test, verbose=1)
-        model_class.save(class_loc)
-        plot_metric(history, metric='accuracy')
-        """
-
         model_reg = recompile(reg_loc, rate=1e-7)
-        history = model_reg.fit(class_mat_train, reg_vec_train, epochs=100, verbose=0, shuffle=True)
-        model_reg.evaluate(class_mat_test, reg_vec_test, verbose=1)
+        history = model_reg.fit(reg_mat_train, reg_vec_train, epochs=100, verbose=0, shuffle=True)
+        model_reg.evaluate(reg_mat_test, reg_vec_test, verbose=1)
         model_reg.save(reg_loc)
         plot_metric(history, metric='mean_absolute_percentage_error')
 
     print(np.mean(reg_vec), max(reg_vec), min(reg_vec), len(np.where(reg_vec==0)[0]))
-    print(np.mean(class_vec), len(class_vec))
 
